@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>LexiRead — PDF Reader</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css" />
+<style>
+  :root {
+    --bg: #f5f0e8;
+    --paper: #fdfaf4;
+    --ink: #1a1612;
+    --ink-soft: #5a5248;
+    --ink-mute: #9a9188;
+    --accent: #c0392b;
+    --accent-warm: #e67e22;
+    --border: #ddd8ce;
+    --shadow: rgba(26,22,18,0.12);
+    --panel: #2c2420;
+    --panel-text: #f0ebe3;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── TOP BAR ── */
+  header {
+    background: var(--panel);
+    color: var(--panel-text);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 0 24px;
+    height: 56px;
+    flex-shrink: 0;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  .logo {
+    font-family: 'Lora', serif;
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #f0ebe3;
+    flex-shrink: 0;
+  }
+
+  .logo span { color: var(--accent); }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+  }
+
+  .upload-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 4px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .upload-btn:hover { background: #a93226; }
+
+  .file-name {
+    font-size: 0.82rem;
+    color: var(--ink-mute);
+    color: #9a8e85;
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+  }
+
+  .page-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .page-btn {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: var(--panel-text);
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+    transition: background 0.15s;
+  }
+  .page-btn:hover { background: rgba(255,255,255,0.2); }
+  .page-btn:disabled { opacity: 0.3; cursor: default; }
+
+  .page-info {
+    font-size: 0.82rem;
+    color: #c0b8b0;
+    min-width: 80px;
+    text-align: center;
+  }
+
+  #file-input { display: none; }
+
+  /* ── MAIN LAYOUT ── */
+  .main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ── PDF VIEWER ── */
+  .reader-area {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 24px;
+    background: #e8e2d8;
+    background-image: radial-gradient(circle at 50% 0%, #ede7db 0%, #e0d9cf 100%);
+  }
+
+  .drop-zone {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 16px;
+    cursor: pointer;
+    width: 100%;
+    min-height: 400px;
+  }
+
+  .drop-zone.drag-over { background: rgba(192,57,43,0.06); border-radius: 8px; }
+
+  .drop-icon {
+    font-size: 4rem;
+    opacity: 0.3;
+  }
+
+  .drop-title {
+    font-family: 'Lora', serif;
+    font-size: 1.5rem;
+    color: var(--ink-soft);
+    font-weight: 400;
+  }
+
+  .drop-sub {
+    font-size: 0.88rem;
+    color: var(--ink-mute);
+    line-height: 1.6;
+  }
+
+  .drop-sub kbd {
+    background: var(--border);
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+  }
+
+  #pdf-canvas-container {
+    display: none;
+    width: 100%;
+    /* Increased from 760px. You can change this to 1200px or 'none' if you want it even bigger */
+    max-width: 1000px; 
+  }
+
+  .canvas-wrapper {
+    position: relative; /* This is the magic line that pins the text layer */
+    margin: 0 auto;
+    box-shadow: 0 4px 32px var(--shadow), 0 1px 4px var(--shadow);
+    background: white;
+    border-radius: 2px;
+  }
+
+  #pdf-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+  }
+
+  .textLayer {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    opacity: 1;
+    line-height: 1;
+    /* this makes text selectable but invisible */
+    pointer-events: all;
+  }
+
+  .textLayer span,
+  .textLayer br {
+    color: transparent;
+    position: absolute;
+    white-space: pre;
+    cursor: text;
+    transform-origin: 0% 0%;
+    /* Scale to fit rendered canvas width */
+    /* actual scaling done via scaleX in JS */
+  }
+
+  /* highlight selected text in the layer */
+  .textLayer ::selection {
+    background: rgba(192, 57, 43, 0.25);
+    color: transparent;
+  }
+
+  /* ── Override pdf_viewer.css so text stays invisible but selectable ── */
+  .textLayer { opacity: 1 !important; }
+  .textLayer span { color: transparent !important; }
+  .textLayer ::selection { background: rgba(192,57,43,0.3) !important; color: transparent !important; }
+  .textLayer .highlight.selected { background: rgba(192,57,43,0.35) !important; }
+
+  /* ── LOOKUP TOOLTIP BUTTON ── */
+  #lookup-tooltip {
+    display: none;
+    position: fixed;
+    z-index: 500;
+    transform: translateX(-50%);
+  }
+
+  #lookup-tooltip button {
+    background: var(--panel);
+    color: white;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 20px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 3px 16px rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+
+  #lookup-tooltip button:hover { background: var(--accent); }
+  #lookup-tooltip button .icon { font-size: 0.9rem; }
+
+  /* ── DEFINITION PANEL ── */
+  .def-panel {
+    width: 340px;
+    flex-shrink: 0;
+    background: var(--paper);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .def-panel-header {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--paper);
+  }
+
+  .def-panel-title {
+    font-family: 'Lora', serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+
+  .def-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  /* Empty state */
+  .def-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    text-align: center;
+    padding: 20px;
+    color: var(--ink-mute);
+  }
+
+  .def-empty-icon { font-size: 2.5rem; opacity: 0.4; }
+
+  .def-empty p {
+    font-size: 0.85rem;
+    line-height: 1.6;
+    font-style: italic;
+  }
+
+  /* Loading */
+  .def-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    gap: 12px;
+    color: var(--ink-mute);
+    font-size: 0.85rem;
+  }
+
+  .spinner {
+    width: 28px; height: 28px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Definition content */
+  .def-word {
+    font-family: 'Lora', serif;
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 4px;
+    letter-spacing: -0.01em;
+  }
+
+  .def-vocab-link {
+    font-size: 0.75rem;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 16px;
+    opacity: 0.8;
+    transition: opacity 0.15s;
+  }
+  .def-vocab-link:hover { opacity: 1; }
+
+  .def-short {
+    font-family: 'Lora', serif;
+    font-size: 0.95rem;
+    font-style: italic;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .def-long {
+    font-size: 0.87rem;
+    color: var(--ink-soft);
+    line-height: 1.7;
+    margin-bottom: 18px;
+  }
+
+  .def-senses-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 12px;
+  }
+
+  .def-sense {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .def-sense:last-child { border-bottom: none; }
+
+  .def-sense-pos {
+    display: inline-block;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--ink-mute);
+    margin-bottom: 6px;
+    letter-spacing: 0.03em;
+  }
+
+  .def-sense-text {
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--ink);
+  }
+
+  .def-sense-example {
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--ink-mute);
+    margin-top: 5px;
+    line-height: 1.5;
+    padding-left: 10px;
+    border-left: 2px solid var(--border);
+  }
+
+  .def-error {
+    background: #fdf0ef;
+    border: 1px solid #f5c6c2;
+    border-radius: 6px;
+    padding: 14px;
+    font-size: 0.85rem;
+    color: var(--accent);
+    line-height: 1.5;
+  }
+
+  /* history */
+  .history-section {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .history-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 10px;
+  }
+  .history-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .history-chip {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: 'Lora', serif;
+    font-style: italic;
+  }
+  .history-chip:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+    font-style: normal;
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">Lexi<span>Read</span></div>
+  <div class="toolbar">
+    <button class="upload-btn" onclick="document.getElementById('file-input').click()">
+      <span>📄</span> Open PDF
+    </button>
+    <input type="file" id="file-input" accept=".pdf" />
+    <span class="file-name" id="file-name-display">No file opened</span>
+  </div>
+  <div class="page-controls">
+    <button class="page-btn" id="prev-btn" onclick="changePage(-1)" disabled>‹</button>
+    <span class="page-info" id="page-info">— / —</span>
+    <button class="page-btn" id="next-btn" onclick="changePage(1)" disabled>›</button>
+  </div>
+</header>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- PDF AREA -->
+  <div class="reader-area" id="reader-area">
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-icon">📖</div>
+      <div class="drop-title">Open a PDF to start reading</div>
+      <div class="drop-sub">
+        Click <kbd>Open PDF</kbd> above or drop a file here.<br>
+        Select any word → click <strong>Look Up</strong> to see its meaning.
+      </div>
+    </div>
+    <div id="pdf-canvas-container">
+      <div class="canvas-wrapper" id="canvas-wrapper">
+        <canvas id="pdf-canvas"></canvas>
+        <div class="textLayer" id="text-layer"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEFINITION PANEL -->
+  <div class="def-panel">
+    <div class="def-panel-header">
+      <div class="def-panel-title">📚 Word Meanings</div>
+    </div>
+    <div class="def-panel-body" id="def-panel-body">
+      <div class="def-empty">
+        <div class="def-empty-icon">🔍</div>
+        <p>Select any word in the PDF and click <strong>Look Up</strong> to see its meaning from vocabulary.com</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- LOOKUP TOOLTIP -->
+<div id="lookup-tooltip">
+  <button onclick="lookupWord()">
+    <span class="icon">🔎</span> Look Up
+  </button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+// ── PDF.js setup ──
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let pdfDoc = null, currentPage = 1, totalPages = 0;
+let selectedWord = '';
+let lookupHistory = [];
+
+const canvas = document.getElementById('pdf-canvas');
+const ctx = canvas.getContext('2d');
+const textLayer = document.getElementById('text-layer');
+const tooltip = document.getElementById('lookup-tooltip');
+const defBody = document.getElementById('def-panel-body');
+const container = document.getElementById('pdf-canvas-container');
+const dropZone = document.getElementById('drop-zone');
+const canvasWrapper = document.getElementById('canvas-wrapper');
+
+// ── File open ──
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) loadPDF(file);
+});
+
+// ── Drag & drop ──
+const readerArea = document.getElementById('reader-area');
+readerArea.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+readerArea.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+readerArea.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type === 'application/pdf') loadPDF(file);
+});
+dropZone.addEventListener('click', () => document.getElementById('file-input').click());
+
+function loadPDF(file) {
+  document.getElementById('file-name-display').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const data = new Uint8Array(e.target.result);
+    pdfjsLib.getDocument({ data }).promise.then(pdf => {
+      pdfDoc = pdf;
+      totalPages = pdf.numPages;
+      currentPage = 1;
+      dropZone.style.display = 'none';
+      container.style.display = 'block';
+      renderPage(currentPage);
+      updatePageUI();
+    });
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function renderPage(num) {
+  const page = await pdfDoc.getPage(num);
+
+  // Use the container's actual display width to determine scale
+  const containerWidth = container.clientWidth || 1000;
+  const unscaledViewport = page.getViewport({ scale: 1 });
+  
+  // Increased max scale from 2.2 to 3.0 so it can stretch beautifully on larger screens
+  const scale = Math.min((containerWidth - 48) / unscaledViewport.width, 3.0); 
+  const viewport = page.getViewport({ scale });
+
+  // Multiply by 2 to force a high-resolution, "retina" quality canvas
+  const outputScale = (window.devicePixelRatio || 1) * 2;
+
+  canvas.width  = Math.floor(viewport.width  * outputScale);
+  canvas.height = Math.floor(viewport.height * outputScale);
+  canvas.style.width  = Math.floor(viewport.width)  + 'px';
+  canvas.style.height = Math.floor(viewport.height) + 'px';
+
+  // Explicitly size the wrapper so the text layer boundaries match the canvas
+  canvasWrapper.style.width = Math.floor(viewport.width) + 'px';
+  canvasWrapper.style.height = Math.floor(viewport.height) + 'px';
+
+  const transform = outputScale !== 1
+    ? [outputScale, 0, 0, outputScale, 0, 0]
+    : null;
+
+  await page.render({ canvasContext: ctx, viewport, transform }).promise;
+
+  // ── Text layer: use PDF.js renderTextLayer for correct positioning ──
+  textLayer.innerHTML = '';
+  textLayer.style.width  = Math.floor(viewport.width)  + 'px';
+  textLayer.style.height = Math.floor(viewport.height) + 'px';
+  
+  // PDF.js requires this variable to stretch the invisible text correctly
+  textLayer.style.setProperty('--scale-factor', viewport.scale);
+
+  const textContent = await page.getTextContent();
+
+  // renderTextLayer is the correct PDF.js API — handles all transforms
+  await pdfjsLib.renderTextLayer({
+    textContentSource: textContent,
+    container: textLayer,
+    viewport: viewport,
+    textDivs: [],
+  }).promise;
+
+  updatePageUI();
+}
+
+function updatePageUI() {
+  document.getElementById('page-info').textContent =
+    pdfDoc ? `${currentPage} / ${totalPages}` : '— / —';
+  document.getElementById('prev-btn').disabled = currentPage <= 1;
+  document.getElementById('next-btn').disabled = currentPage >= totalPages;
+}
+
+function changePage(delta) {
+  const next = currentPage + delta;
+  if (next >= 1 && next <= totalPages) {
+    currentPage = next;
+    renderPage(currentPage);
+    tooltip.style.display = 'none';
+  }
+}
+
+// ── Word selection & tooltip ──
+document.addEventListener('mouseup', e => {
+  if (e.target.closest('#lookup-tooltip')) return;
+  if (e.target.closest('#def-panel-body')) return;
+
+  setTimeout(() => {
+    const sel = window.getSelection();
+    const word = sel ? sel.toString().trim().replace(/[^a-zA-Z'-]/g, '') : '';
+
+    if (word.length >= 2 && /^[a-zA-Z]/.test(word)) {
+      selectedWord = word;
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      tooltip.style.display = 'block';
+      tooltip.style.left = (rect.left + rect.width / 2) + 'px';
+      tooltip.style.top = (rect.bottom + window.scrollY + 10) + 'px';
+    } else {
+      tooltip.style.display = 'none';
+    }
+  }, 10);
+});
+
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('#lookup-tooltip')) {
+    tooltip.style.display = 'none';
+  }
+});
+
+// ── Lookup ──
+async function lookupWord() {
+  tooltip.style.display = 'none';
+  if (!selectedWord) return;
+
+  const word = selectedWord;
+  showLoading(word);
+
+  try {
+    const res = await fetch(`/lookup?word=${encodeURIComponent(word)}`);
+    const data = await res.json();
+
+    if (data.error) {
+      showError(word, data.error);
+    } else {
+      showDefinition(data);
+      addToHistory(word);
+    }
+  } catch (err) {
+    showError(word, 'Could not reach the server. Is it running?');
+  }
+}
+
+function showLoading(word) {
+  defBody.innerHTML = `
+    <div class="def-loading">
+      <div class="spinner"></div>
+      <span>Looking up "<em>${word}</em>"…</span>
+    </div>`;
+}
+
+function showError(word, msg) {
+  defBody.innerHTML = `
+    <div class="def-error">
+      <strong>Could not find "${word}"</strong><br>${msg}
+    </div>
+    ${historyHTML()}`;
+}
+
+function showDefinition(data) {
+  const sensesHTML = data.definitions.length ? `
+    <div class="def-senses-label">Definitions</div>
+    ${data.definitions.map(s => `
+      <div class="def-sense">
+        ${s.pos ? `<span class="def-sense-pos">${s.pos}</span>` : ''}
+        <div class="def-sense-text">${s.definition}</div>
+        ${s.example ? `<div class="def-sense-example">"${s.example}"</div>` : ''}
+      </div>`).join('')}` : '';
+
+  defBody.innerHTML = `
+    <div class="def-word">${data.word}</div>
+    <a class="def-vocab-link" href="https://www.vocabulary.com/dictionary/${data.word}" target="_blank">
+      ↗ vocabulary.com
+    </a>
+    ${data.short ? `<div class="def-short">${data.short}</div>` : ''}
+    ${data.long && data.long !== data.short ? `<div class="def-long">${data.long}</div>` : ''}
+    ${sensesHTML}
+    ${historyHTML()}`;
+}
+
+// ── History ──
+function addToHistory(word) {
+  if (!lookupHistory.includes(word)) {
+    lookupHistory.unshift(word);
+    if (lookupHistory.length > 20) lookupHistory.pop();
+  }
+}
+
+function historyHTML() {
+  if (lookupHistory.length === 0) return '';
+  return `
+    <div class="history-section">
+      <div class="history-label">Recent lookups</div>
+      <div class="history-chips">
+        ${lookupHistory.map(w =>
+          `<span class="history-chip" onclick="lookupFromHistory('${w}')">${w}</span>`
+        ).join('')}
+      </div>
+    </div>`;
+}
+
+function lookupFromHistory(word) {
+  selectedWord = word;
+  lookupWord();
+}
+
+// Keyboard shortcut: Enter to look up
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && tooltip.style.display === 'block') lookupWord();
+  if (e.key === 'ArrowRight' && pdfDoc) changePage(1);
+  if (e.key === 'ArrowLeft' && pdfDoc) changePage(-1);
+});
+</script>
+</body>
+</html>
