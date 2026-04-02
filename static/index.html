@@ -136,7 +136,7 @@
   /* ── PDF VIEWER ── */
   .reader-area {
     flex: 1;
-    overflow-y: auto;
+    overflow: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -189,9 +189,8 @@
 
   #pdf-canvas-container {
     display: none;
-    width: 100%;
-    /* Increased from 760px. You can change this to 1200px or 'none' if you want it even bigger */
-    max-width: 1000px; 
+    width: max-content; /* This allows the container to grow freely when zooming */
+    margin: 0 auto;
   }
 
   .canvas-wrapper {
@@ -500,6 +499,11 @@
     <span class="file-name" id="file-name-display">No file opened</span>
   </div>
   <div class="page-controls">
+    <button class="page-btn" id="zoom-out-btn" title="Zoom Out">−</button>
+    <button class="page-btn" id="zoom-in-btn" title="Zoom In">+</button>
+    
+    <span style="border-left: 1px solid rgba(255,255,255,0.2); height: 24px; margin: 0 4px;"></span>
+    
     <button class="page-btn" id="prev-btn" onclick="changePage(-1)" disabled>‹</button>
     <span class="page-info" id="page-info">— / —</span>
     <button class="page-btn" id="next-btn" onclick="changePage(1)" disabled>›</button>
@@ -558,6 +562,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 let pdfDoc = null, currentPage = 1, totalPages = 0;
 let selectedWord = '';
 let lookupHistory = [];
+let zoomLevel = 1.0; // Keeps track of how zoomed in we are
 
 const canvas = document.getElementById('pdf-canvas');
 const ctx = canvas.getContext('2d');
@@ -607,12 +612,13 @@ function loadPDF(file) {
 async function renderPage(num) {
   const page = await pdfDoc.getPage(num);
 
-  // Use the container's actual display width to determine scale
-  const containerWidth = container.clientWidth || 1000;
+  // Use the reader area width to calculate the baseline scale
+  const readerAreaWidth = document.getElementById('reader-area').clientWidth;
   const unscaledViewport = page.getViewport({ scale: 1 });
   
-  // Increased max scale from 2.2 to 3.0 so it can stretch beautifully on larger screens
-  const scale = Math.min((containerWidth - 48) / unscaledViewport.width, 3.0); 
+  // Calculate baseline to fit screen, then multiply by the user's zoomLevel
+  const baseScale = Math.min((readerAreaWidth - 48) / unscaledViewport.width, 3.0);
+  const scale = baseScale * zoomLevel; 
   const viewport = page.getViewport({ scale });
 
   // Multiply by 2 to force a high-resolution, "retina" quality canvas
@@ -790,6 +796,20 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight' && pdfDoc) changePage(1);
   if (e.key === 'ArrowLeft' && pdfDoc) changePage(-1);
 });
+
+// ── Zoom Controls ──
+document.getElementById('zoom-in-btn').addEventListener('click', () => {
+  zoomLevel += 0.25; // Zoom in by 25%
+  if (pdfDoc) renderPage(currentPage);
+});
+
+document.getElementById('zoom-out-btn').addEventListener('click', () => {
+  if (zoomLevel > 0.5) { // Prevent it from shrinking to microscopic sizes
+    zoomLevel -= 0.25; // Zoom out by 25%
+    if (pdfDoc) renderPage(currentPage);
+  }
+});
+
 </script>
 </body>
 </html>
