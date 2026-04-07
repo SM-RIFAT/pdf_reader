@@ -606,62 +606,81 @@ function loadPDF(file) {
 
 async function renderAllPages() {
   const container = document.getElementById('pdf-canvas-container');
-  container.innerHTML = ''; // Clear out any old pages
+  container.innerHTML = ''; 
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
+  container.style.alignItems = 'center'; // Keeps pages centered
 
-  // Loop through every page in the PDF and stack them
   for (let num = 1; num <= totalPages; num++) {
     const page = await pdfDoc.getPage(num);
 
-    // 1. Create the wrapper for this specific page
+    // 1. The Outer Box (Handles document layout and scrolling)
+    const pageContainer = document.createElement('div');
+    pageContainer.className = 'page-container';
+    pageContainer.style.position = 'relative';
+    pageContainer.style.margin = '0 auto 20px auto';
+
+    // 2. The Inner Box (Locks the canvas and text together)
     const wrapper = document.createElement('div');
     wrapper.className = 'canvas-wrapper';
-    
-    // 2. Create the canvas
+    wrapper.style.position = 'absolute';
+    wrapper.style.top = '0';
+    wrapper.style.left = '0';
+    wrapper.style.transformOrigin = 'top left'; // Ensures it scales from the corner
+
     const canvas = document.createElement('canvas');
     canvas.className = 'pdf-canvas';
     const ctx = canvas.getContext('2d');
 
-    // 3. Create the text layer for highlighting
     const textLayer = document.createElement('div');
     textLayer.className = 'textLayer';
 
     wrapper.appendChild(canvas);
     wrapper.appendChild(textLayer);
-    container.appendChild(wrapper);
+    pageContainer.appendChild(wrapper);
+    container.appendChild(pageContainer);
 
-    // 4. Calculate sizes and zoom
+    // 3. Calculate fixed base sizes
     const readerAreaWidth = document.getElementById('reader-area').clientWidth;
     const unscaledViewport = page.getViewport({ scale: 1 });
     const baseScale = Math.min((readerAreaWidth - 48) / unscaledViewport.width, 3.0);
-    const scale = baseScale * zoomLevel; 
-    const viewport = page.getViewport({ scale });
+    const baseViewport = page.getViewport({ scale: baseScale });
 
+    // Save base sizes for the zoom function
+    pageContainer.setAttribute('data-base-width', baseViewport.width);
+    pageContainer.setAttribute('data-base-height', baseViewport.height);
+
+    // 4. Lock Inner Box and elements exactly to the Base Size
+    wrapper.style.width = baseViewport.width + 'px';
+    wrapper.style.height = baseViewport.height + 'px';
+    canvas.style.width = baseViewport.width + 'px';
+    canvas.style.height = baseViewport.height + 'px';
+    textLayer.style.width = baseViewport.width + 'px';
+    textLayer.style.height = baseViewport.height + 'px';
+
+    // 5. Size Outer Box to match the current active zoom
+    const currentWidth = baseViewport.width * zoomLevel;
+    const currentHeight = baseViewport.height * zoomLevel;
+    pageContainer.style.width = currentWidth + 'px';
+    pageContainer.style.height = currentHeight + 'px';
+
+    // Scale the Inner Box up to match
+    wrapper.style.transform = `scale(${zoomLevel})`;
+
+    // 6. Render Canvas exactly ONCE
     const outputScale = (window.devicePixelRatio || 1) * 2;
-    canvas.width = Math.floor(viewport.width * outputScale);
-    canvas.height = Math.floor(viewport.height * outputScale);
-    canvas.style.width = Math.floor(viewport.width) + 'px';
-    canvas.style.height = Math.floor(viewport.height) + 'px';
-
-    wrapper.style.width = Math.floor(viewport.width) + 'px';
-    wrapper.style.height = Math.floor(viewport.height) + 'px';
-
+    canvas.width = Math.floor(baseViewport.width * outputScale);
+    canvas.height = Math.floor(baseViewport.height * outputScale);
     const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+    await page.render({ canvasContext: ctx, viewport: baseViewport, transform }).promise;
 
-    // 5. Render the physical image
-    await page.render({ canvasContext: ctx, viewport, transform }).promise;
-
-    // 6. Render the invisible text layer
-    textLayer.style.width = Math.floor(viewport.width) + 'px';
-    textLayer.style.height = Math.floor(viewport.height) + 'px';
-    textLayer.style.setProperty('--scale-factor', viewport.scale);
-
+    // 7. Render Text Layer exactly ONCE
     const textContent = await page.getTextContent();
+    textLayer.style.setProperty('--scale-factor', baseScale);
     pdfjsLib.renderTextLayer({
       textContentSource: textContent,
       container: textLayer,
-      viewport: viewport,
+      viewport: baseViewport,
       textDivs: []
     });
   }
@@ -808,34 +827,42 @@ document.addEventListener('keydown', e => {
 
 // ── Zoom Controls ──
 document.getElementById('zoom-in-btn').addEventListener('click', () => {
-  zoomLevel += 0.25; // Zoom in by 25%
-  if (pdfDoc) renderAllPages();
+  zoomLevel += 0.25; 
+  if (pdfDoc) applySmoothZoom();
 });
 
 document.getElementById('zoom-out-btn').addEventListener('click', () => {
-  if (zoomLevel > 0.5) { // Prevent it from shrinking to microscopic sizes
-    zoomLevel -= 0.25; // Zoom out by 25%
-    if (pdfDoc) renderAllPages();
+  if (zoomLevel > 0.5) { 
+    zoomLevel -= 0.25; 
+    if (pdfDoc) applySmoothZoom();
   }
 });
-// ── Update Page Number on Scroll ──
-document.getElementById('reader-area').addEventListener('scroll', () => {
-  const pages = document.querySelectorAll('.canvas-wrapper');
-  let mostVisiblePage = 1;
-  
-  pages.forEach((page, index) => {
-    const rect = page.getBoundingClientRect();
-    // If the top of the page passes above the middle of your screen, count it as the active page
-    if (rect.top < window.innerHeight / 2) {
-      mostVisiblePage = index + 1;
-    }
-  });
 
-  if (currentPage !== mostVisiblePage) {
-    currentPage = mostVisiblePage;
-    document.getElementById('page-info').textContent = `${currentPage} / ${totalPages}`;
+// The secret to instant, lag-free zooming
+function applySmoothZoom() {
+  const reader = document.getElementById('reader-area');
+  const scrollPercent = reader.scrollTop / reader.scrollHeight;
+
+  // We loop through the new Outer Boxes
+  const pages = document.querySelectorAll('.page-container');
+  
+  for (const container of pages) {
+    const baseW = parseFloat(container.getAttribute('data-base-width'));
+    const baseH = parseFloat(container.getAttribute('data-base-height'));
+
+    // Expand the Outer Box so the browser scrollbar adapts
+    container.style.width = (baseW * zoomLevel) + 'px';
+    container.style.height = (baseH * zoomLevel) + 'px';
+
+    // Instantly scale the Inner Box (which perfectly scales the Canvas & Text together!)
+    const wrapper = container.querySelector('.canvas-wrapper');
+    wrapper.style.transform = `scale(${zoomLevel})`;
   }
-});
+
+  // Restore scroll position
+  reader.scrollTop = scrollPercent * reader.scrollHeight;
+}
+
 </script>
 </body>
 </html>
